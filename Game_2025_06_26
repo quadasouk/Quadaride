@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>La Quadaride</title>
+    <!-- Ajout de la librairie Tone.js pour le son -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Arial', sans-serif;
+        }
+        canvas {
+            background-color: #70c5ce; /* Couleur du ciel */
+            display: block;
+        }
+        .panel {
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.85);
+            padding: 10px 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            text-align: center;
+            z-index: 10;
+        }
+        #infoBox {
+            top: 20px;
+            left: 20px;
+        }
+        #infoBox h1 {
+            margin: 0 0 10px 0;
+            font-size: 24px;
+        }
+        #infoBox p {
+            margin: 5px 0;
+            font-size: 16px;
+        }
+        #speedBox {
+            top: 20px;
+            right: 20px;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        #warningBox {
+            display: none; /* Caché par défaut */
+            bottom: 20px;
+            right: 20px;
+            background-color: #d32f2f;
+            color: white;
+            font-size: 22px;
+            font-weight: bold;
+            padding: 15px 20px;
+            animation: flash 1s linear infinite;
+        }
+        @keyframes flash {
+            0% { opacity: 1; }
+            50% { opacity: 0.3; }
+            100% { opacity: 1; }
+        }
+        .modal-overlay {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 20;
+        }
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        .modal-content h2 {
+            margin-top: 0;
+        }
+        .modal-content input {
+            padding: 10px;
+            font-size: 16px;
+            width: 80%;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+        .modal-content button {
+            padding: 12px 25px;
+            font-size: 18px;
+            cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            background-color: #28a745;
+            color: white;
+            font-weight: bold;
+        }
+        #highScores {
+            list-style-type: none;
+            padding: 0;
+            max-height: 150px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+        #highScores li {
+            background: #f1f1f1;
+            padding: 5px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <!-- Écran de démarrage pour demander le nom -->
+    <div id="startModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>Bienvenue à La Quadaride !</h2>
+            <p>Entrez votre nom pour commencer :</p>
+            <input type="text" id="playerNameInput" placeholder="Cycliste Anonyme" maxlength="15">
+            <button id="startGameBtn">Jouer !</button>
+        </div>
+    </div>
+
+
+    <!-- Panneaux d'information du jeu -->
+    <div id="infoBox" class="panel">
+        <h1>La Quadaride</h1>
+        <p>Score: <span id="scoreDisplay">0</span></p>
+        <p>Distance: <span id="distanceDisplay">0</span> m</p>
+    </div>
+    <div id="speedBox" class="panel">
+        Vitesse: <span id="speedDisplay">0</span> km/h
+    </div>
+    <div id="warningBox" class="panel">
+        ! VOITURE !
+    </div>
+
+
+    <!-- Canevas du jeu -->
+    <canvas id="gameCanvas"></canvas>
+
+
+    <!-- Écran de fin de partie -->
+    <div id="gameOverModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h2 id="gameOverTitle">Perdu !</h2>
+            <p>Score final: <span id="finalScore">0</span></p>
+            <button id="restartButton">Recommencer</button>
+            <h3>Meilleurs Scores</h3>
+            <ol id="highScores"></ol>
+        </div>
+    </div>
+
+
+    <script>
+        // --- Références aux éléments du DOM ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplayElement = document.getElementById('scoreDisplay');
+        const distanceDisplayElement = document.getElementById('distanceDisplay');
+        const speedDisplayElement = document.getElementById('speedDisplay');
+        const warningBox = document.getElementById('warningBox');
+        const startModal = document.getElementById('startModal');
+        const gameOverModal = document.getElementById('gameOverModal');
+        const playerNameInput = document.getElementById('playerNameInput');
+        const startGameBtn = document.getElementById('startGameBtn');
+        const finalScoreElement = document.getElementById('finalScore');
+        const restartButton = document.getElementById('restartButton');
+        const highScoresList = document.getElementById('highScores');
+        const gameOverTitle = document.getElementById('gameOverTitle');
+
+
+        // --- Configuration du jeu ---
+        let canvasWidth, canvasHeight, horizonY;
+        let gameSpeed = 4, score = 0, distance = 0;
+        let gameOver = false, animationFrameId;
+        let playerName = "Cycliste";
+        let nextPotholeDistance = 0;
+        let nextVehicleDistance = 0;
+        let isVehicleSpawning = false;
+        let showCarBackWarning = false;
+
+
+        // --- Configuration de la route et du joueur ---
+        const roadPoints = { horizonLeft: 0, horizonRight: 0, bottomLeft: 0, bottomRight: 0 };
+        const cyclist = { x: 0, y: 0, baseWidth: 15, baseHeight: 30, speed: 7, color: '#ff4500' };
+        const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+
+
+        // --- Tableaux des objets du jeu ---
+        const potholes = [], clouds = [], roadMarkings = [], cornStalks = [], vehicles = [];
+        const peloton = [];
+        const positionHistory = [];
+        const pelotonColors = ['#4682B4', '#32CD32', '#DAA520', '#B22222']; // Couleurs pour le peloton
+
+
+        // --- Gestion du son avec Tone.js ---
+        let synth, warningBeep;
+        let isWarningSoundPlaying = false;
+
+
+        function initAudio() {
+            if (Tone.context.state !== 'running') { Tone.start(); }
+            synth = new Tone.Synth({ oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.2, release: 0.1 } }).toDestination();
+            warningBeep = new Tone.Loop(time => { synth.triggerAttackRelease("C5", "16n", time); }, "4n");
+        }
+
+
+        function playHonk() { if (synth) { synth.triggerAttackRelease("A4", "8n", Tone.now()); synth.triggerAttackRelease("A4", "8n", Tone.now() + 0.1); } }
+        function playWarningSound() { if (warningBeep && !isWarningSoundPlaying) { warningBeep.start(0); isWarningSoundPlaying = true; } }
+        function stopWarningSound() { if (warningBeep && isWarningSoundPlaying) { warningBeep.stop(); isWarningSoundPlaying = false; } }
+
+
+        // --- Fonctions de perspective et de sauvegarde ---
+        function getRoadBoundariesAt(y) {
+            const p = (y - horizonY) / (canvasHeight - horizonY);
+            if (p < 0) return { left: roadPoints.horizonLeft, right: roadPoints.horizonRight };
+            const left = roadPoints.horizonLeft + (roadPoints.bottomLeft - roadPoints.horizonLeft) * p;
+            const right = roadPoints.horizonRight + (roadPoints.bottomRight - roadPoints.horizonRight) * p;
+            return { left, right };
+        }
+
+
+        function getHighScores() {
+            const scores = localStorage.getItem('quadarideHighScores');
+            return scores ? JSON.parse(scores) : [];
+        }
+
+
+        function saveHighScore(score, name) {
+            const scores = getHighScores();
+            scores.push({ name, score });
+            scores.sort((a, b) => b.score - a.score);
+            scores.splice(10); // Garder seulement le top 10
+            localStorage.setItem('quadarideHighScores', JSON.stringify(scores));
+            return scores.some(s => s.score === score && s.name === name);
+        }
+
+
+        function displayHighScores() {
+            const scores = getHighScores();
+            highScoresList.innerHTML = '';
+            if (scores.length === 0) {
+                highScoresList.innerHTML = '<li>Aucun score enregistré</li>';
+            } else {
+                scores.forEach(s => {
+                    const li = document.createElement('li');
+                    li.textContent = `${s.name}: ${s.score}`;
+                    highScoresList.appendChild(li);
+                });
+            }
+        }
+
+
+        // --- Fonctions d'initialisation et de redimensionnement ---
+        function resizeCanvas() {
+            const targetAspectRatio = 9 / 18;
+            let potentialWidth = window.innerHeight * targetAspectRatio;
+           
+            if (potentialWidth > window.innerWidth) {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerWidth / targetAspectRatio;
+            } else {
+                canvas.width = potentialWidth;
+                canvas.height = window.innerHeight;
+            }
+           
+            canvasWidth = canvas.width;
+            canvasHeight = canvas.height;
+            horizonY = canvasHeight * (5 / 16);
+
+
+            const horizonWidth = canvasWidth * (4 / 18); // Ratio 4:18
+            roadPoints.horizonLeft = (canvasWidth - horizonWidth) / 2;
+            roadPoints.horizonRight = roadPoints.horizonLeft + horizonWidth;
+            roadPoints.bottomLeft = 0;
+            roadPoints.bottomRight = canvasWidth;
+
+
+            cyclist.x = canvasWidth * 0.75 - cyclist.baseWidth / 2;
+            cyclist.y = canvasHeight * 0.9 - cyclist.baseHeight;
+        }
+
+
+        // --- Fonctions de dessin ---
+        function drawSky() { ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, 0, canvasWidth, horizonY); }
+        function drawGround() { ctx.fillStyle = '#b99b6b'; ctx.fillRect(0, horizonY, canvasWidth, canvasHeight - horizonY); }
+        function drawMountain() {
+            ctx.fillStyle = '#6B8E23';
+            ctx.beginPath();
+            ctx.moveTo(canvasWidth * 0.6, horizonY);
+            ctx.quadraticCurveTo(canvasWidth * 0.8, horizonY - 120, canvasWidth, horizonY);
+            ctx.closePath();
+            ctx.fill();
+        }
+        function drawClouds() {
+            ctx.fillStyle = 'white';
+            clouds.forEach(c => { ctx.beginPath(); ctx.arc(c.x, c.y, c.radius, 0, Math.PI * 2); ctx.fill(); });
+        }
+        function drawRoad() {
+            ctx.fillStyle = '#696969';
+            ctx.beginPath();
+            ctx.moveTo(roadPoints.horizonLeft, horizonY);
+            ctx.lineTo(roadPoints.horizonRight, horizonY);
+            ctx.lineTo(roadPoints.bottomRight, canvasHeight);
+            ctx.lineTo(roadPoints.bottomLeft, canvasHeight);
+            ctx.closePath();
+            ctx.fill();
+
+
+            ctx.strokeStyle = '#f0e68c';
+            roadMarkings.forEach(mark => {
+                const p = (mark.y - horizonY) / (canvasHeight - horizonY);
+                if (p < 0) return;
+                ctx.lineWidth = 1 + p * 4;
+                const markX = canvasWidth / 2;
+                ctx.beginPath();
+                ctx.moveTo(markX, mark.y);
+                ctx.lineTo(markX, mark.y + mark.length);
+                ctx.stroke();
+            });
+        }
+        function drawCornfields() {
+            cornStalks.forEach(stalk => {
+                const p = (stalk.y - horizonY) / (canvasHeight - horizonY);
+                if (p < 0) return;
+                const stalkHeight = p * 20;
+                const stalkX = stalk.side === 'left'
+                    ? roadPoints.horizonLeft * (1 - p) - 10
+                    : roadPoints.horizonRight + (canvasWidth - roadPoints.horizonRight) * p + 10;
+                ctx.fillStyle = '#2E8B57'; // Couleur verte pour les champs
+                ctx.fillRect(stalkX, stalk.y - stalkHeight, 3, stalkHeight);
+            });
+        }
+        function drawPotholes() {
+            potholes.forEach(p => {
+                const perspective = (p.y - horizonY) / (canvasHeight - horizonY);
+                if (perspective < 0) return;
+                const radius = p.baseRadius * perspective;
+                ctx.beginPath();
+                ctx.ellipse(p.x, p.y, radius, radius * 0.5, 0, 0, Math.PI * 2);
+                ctx.fillStyle = '#3a3a3a';
+                ctx.fill();
+            });
+        }
+        function drawVehicles() {
+            vehicles.forEach(v => {
+                const p = (v.y - horizonY) / (canvasHeight - horizonY);
+                if (p < 0) return;
+               
+                const w = v.baseWidth * p;
+                const h = v.baseHeight * p;
+               
+                ctx.fillStyle = v.color;
+                ctx.fillRect(v.x - w / 2, v.y - h, w, h);
+
+
+                ctx.fillStyle = '#222';
+                const wheelW = w * 0.15;
+                const wheelH = h * 0.25;
+                ctx.fillRect(v.x - w / 2 - wheelW, v.y - h * 0.85, wheelW, wheelH);
+                ctx.fillRect(v.x + w / 2, v.y - h * 0.85, wheelW, wheelH);
+                ctx.fillRect(v.x - w / 2 - wheelW, v.y - h * 0.25, wheelW, wheelH);
+                ctx.fillRect(v.x + w / 2, v.y - h * 0.25, wheelW, wheelH);
+            });
+        }
+       
+        function drawSingleCyclist(p) {
+            const perspective = 0.5 + 0.5 * ((p.y - horizonY) / (canvasHeight - horizonY));
+            const w = p.baseWidth * perspective;
+            const h = p.baseHeight * perspective;
+
+
+            const vanishingPointX = canvasWidth / 2;
+            const vanishingPointY = horizonY;
+            const angle = Math.atan2(p.y - vanishingPointY, p.x - vanishingPointX);
+
+
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(angle + Math.PI / 2);
+           
+            // Corps
+            ctx.fillStyle = p.color;
+            ctx.fillRect(-w / 2, -h / 2, w, h);
+            // Tête
+            ctx.beginPath();
+            ctx.arc(0, -h / 2 - (5 * perspective), 6 * perspective, 0, Math.PI * 2);
+            ctx.fillStyle = '#F0E68C';
+            ctx.fill();
+            // Roues (lignes)
+            ctx.fillStyle = '#333';
+            ctx.fillRect(-1 * perspective, h / 2, 2 * perspective, h); // Roue arrière
+            ctx.fillRect(-1 * perspective, -h / 2 - h, 2 * perspective, h); // Roue avant
+
+
+            ctx.restore();
+        }
+
+
+        function drawCarBackWarning() {
+            if (showCarBackWarning && peloton.length > 0) {
+                const lastFollower = peloton[peloton.length - 1];
+                const p = lastFollower;
+                const bubbleX = p.x + p.baseWidth / 2;
+                const bubbleY = p.y - 40;
+                ctx.fillStyle = 'white';
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(bubbleX, bubbleY);
+                ctx.lineTo(bubbleX - 10, bubbleY - 10);
+                ctx.lineTo(bubbleX - 40, bubbleY - 10);
+                ctx.lineTo(bubbleX - 40, bubbleY - 30);
+                ctx.lineTo(bubbleX + 40, bubbleY - 30);
+                ctx.lineTo(bubbleX + 40, bubbleY - 10);
+                ctx.lineTo(bubbleX + 10, bubbleY - 10);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+
+                ctx.fillStyle = 'black';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Car Back!', bubbleX, bubbleY - 15);
+            }
+        }
+
+
+        // --- Fonctions de mise à jour ---
+        function updatePotholes() {
+            for (let i = potholes.length - 1; i >= 0; i--) {
+                potholes[i].y += gameSpeed;
+                if (potholes[i].y > canvasHeight + potholes[i].baseRadius) potholes.splice(i, 1);
+            }
+            if (distance > nextPotholeDistance) {
+                const { left, right } = getRoadBoundariesAt(horizonY);
+                const x = left + Math.random() * (right - left);
+                potholes.push({ x: x, y: horizonY, baseRadius: Math.random() * 15 + 10 });
+                // Apparition entre 75m et 125m
+                nextPotholeDistance = distance + 75 + Math.random() * 50;
+            }
+        }
+
+
+        function updateVehicles() {
+            for (let i = vehicles.length - 1; i >= 0; i--) {
+                const v = vehicles[i];
+                let intendedSpeed = gameSpeed * v.speedFactor;
+
+
+                // Logique anti-collision
+                for (let j = 0; j < vehicles.length; j++) {
+                    if (i === j) continue;
+                    const other = vehicles[j];
+                    if (v.direction === other.direction) {
+                        const yDist = other.y - v.y;
+                        if (v.direction === 'down' && yDist > 0 && yDist < 150) {
+                            intendedSpeed = Math.min(intendedSpeed, gameSpeed * other.speedFactor * 0.9);
+                        } else if (v.direction === 'up' && yDist < 0 && yDist > -150) {
+                             intendedSpeed = Math.min(intendedSpeed, gameSpeed * other.speedFactor * 0.9);
+                        }
+                    }
+                }
+               
+                if (v.direction === 'down') {
+                    v.y += intendedSpeed;
+                    if (v.y > canvasHeight + 100) vehicles.splice(i, 1);
+                } else {
+                    v.y -= intendedSpeed;
+                    if (v.y < horizonY) vehicles.splice(i, 1);
+                }
+
+
+                if (v.direction === 'up') {
+                    const yDist = v.y - cyclist.y;
+                    const xDist = Math.abs(cyclist.x - v.x);
+
+
+                    if (v.isSwerving) {
+                        v.x -= 1.5;
+                        if (v.y < cyclist.y - cyclist.baseHeight) {
+                            v.isSwerving = false;
+                            v.isReturning = true;
+                        }
+                    } else if (v.isReturning) {
+                        if (v.x < v.laneCenter) {
+                            v.x += 1.5;
+                        } else {
+                            v.x = v.laneCenter;
+                            v.isReturning = false;
+                        }
+                    } else {
+                        if (yDist > 0 && yDist < 200 && xDist < 100) {
+                            v.isSwerving = true;
+                            playHonk();
+                        }
+                    }
+                }
+               
+                const { left, right } = getRoadBoundariesAt(v.y);
+                const p = (v.y - horizonY) / (canvasHeight - horizonY);
+                const w = v.baseWidth * p;
+                v.x = Math.max(v.x, left + w / 2 + (w * 0.15));
+                v.x = Math.min(v.x, right - w / 2 - (w * 0.15));
+            }
+
+
+            // Apparition basée sur la distance avec pré-avertissement
+            if (distance > nextVehicleDistance && !isVehicleSpawning && vehicles.length < 4) {
+                isVehicleSpawning = true;
+                const direction = Math.random() > 0.5 ? 'down' : 'up';
+
+
+                if (direction === 'up') {
+                    warningBox.style.display = 'block';
+                    showCarBackWarning = true;
+                    playWarningSound();
+                }
+
+
+                setTimeout(() => {
+                    if (gameOver) return; // Ne pas créer de véhicule si le jeu est fini
+                   
+                    let x, y;
+                    const { left, right } = getRoadBoundariesAt(direction === 'down' ? horizonY : canvasHeight);
+                    const laneWidth = (right - left) / 2;
+                   
+                    if (direction === 'down') {
+                        x = left + laneWidth / 2;
+                        y = horizonY;
+                    } else {
+                        x = left + laneWidth + laneWidth / 2;
+                        y = canvasHeight;
+                    }
+                    vehicles.push({
+                        x: x, y: y, direction: direction,
+                        laneCenter: x,
+                        baseWidth: cyclist.baseWidth * 5, baseHeight: cyclist.baseHeight * 2.5,
+                        speedFactor: direction === 'up' ? 0.7 : (0.8 + Math.random() * 0.4),
+                        color: `hsl(${Math.random() * 360}, 60%, 50%)`,
+                        isSwerving: false, isReturning: false
+                    });
+
+
+                    if (direction === 'up') {
+                        warningBox.style.display = 'none';
+                        showCarBackWarning = false;
+                        stopWarningSound();
+                    }
+                    isVehicleSpawning = false;
+                }, 3000);
+
+
+                nextVehicleDistance = distance + 400;
+            }
+        }
+
+
+        function updateRoadMarkings() {
+            for (let i = roadMarkings.length - 1; i >= 0; i--) {
+                roadMarkings[i].y += gameSpeed;
+                if (roadMarkings[i].y > canvasHeight) roadMarkings.splice(i, 1);
+            }
+            if (roadMarkings.length === 0 || roadMarkings[roadMarkings.length - 1].y > horizonY + 80) {
+                roadMarkings.push({ y: horizonY, length: 30 });
+            }
+        }
+       
+        function updateCornStalks() {
+            for (let i = cornStalks.length - 1; i >= 0; i--) {
+                cornStalks[i].y += gameSpeed;
+                if (cornStalks[i].y > canvasHeight) cornStalks.splice(i, 1);
+            }
+            if (Math.random() < 0.8) {
+                cornStalks.push({ y: horizonY, side: 'left' });
+                cornStalks.push({ y: horizonY, side: 'right' });
+            }
+        }
+
+
+        function updateCyclistPosition() {
+            const { left, right } = getRoadBoundariesAt(cyclist.y);
+            const p = (cyclist.y - horizonY) / (canvasHeight - horizonY);
+            const w = cyclist.baseWidth * p;
+            if (keys.ArrowLeft && cyclist.x > left) cyclist.x -= cyclist.speed;
+            if (keys.ArrowRight && cyclist.x < right - w) cyclist.x += cyclist.speed;
+            if (keys.ArrowUp && cyclist.y > horizonY + cyclist.baseHeight) cyclist.y -= cyclist.speed;
+            if (keys.ArrowDown && cyclist.y < canvasHeight - cyclist.baseHeight) cyclist.y += cyclist.speed;
+        }
+
+
+        function updatePeloton() {
+            const vanishingPointX = canvasWidth / 2;
+            const vanishingPointY = horizonY;
+
+
+            positionHistory.unshift({ x: cyclist.x, y: cyclist.y });
+            if (positionHistory.length > 200) {
+                positionHistory.pop();
+            }
+
+
+            peloton.forEach((follower, index) => {
+                const delay = (index + 1) * 25;
+                if (positionHistory.length > delay) {
+                    const targetPos = positionHistory[delay];
+                   
+                    const leaderAngle = Math.atan2(targetPos.y - vanishingPointY, targetPos.x - vanishingPointX);
+                   
+                    const perspective = 0.5 + 0.5 * ((follower.y - horizonY) / (canvasHeight - horizonY));
+                    const spacing = (cyclist.baseHeight * 3) * perspective;
+
+
+                    follower.x = targetPos.x + Math.cos(leaderAngle) * spacing * (index + 1);
+                    follower.y = targetPos.y + Math.sin(leaderAngle) * spacing * (index + 1);
+                }
+            });
+        }
+       
+        function checkCollisions() {
+            const allCyclists = [cyclist, ...peloton];
+           
+            for(const c of allCyclists) {
+                const p = (c.y - horizonY) / (canvasHeight - horizonY);
+                const w = c.baseWidth * p;
+                const h = c.baseHeight * p;
+
+
+                potholes.forEach(pot => {
+                    const potP = (pot.y - horizonY) / (canvasHeight - horizonY);
+                    if (potP < 0) return;
+                    const rX = pot.baseRadius * potP;
+                    const rY = rX * 0.5;
+                    if (c.x < pot.x + rX && c.x + w > pot.x - rX &&
+                        c.y < pot.y + rY && c.y + h > pot.y - rY) {
+                        gameOver = true;
+                    }
+                });
+                vehicles.forEach(v => {
+                    const carP = (v.y - horizonY) / (canvasHeight - horizonY);
+                    const carW = v.baseWidth * carP;
+                    const carH = v.baseHeight * carP;
+                    const carX = v.x - carW / 2;
+                    const carY = v.y - carH;
+                    if (c.x < carX + carW && c.x + w > carX &&
+                        c.y < carY + carH && c.y + h > carY) {
+                        gameOver = true;
+                    }
+                });
+            }
+
+
+            if(gameOver) {
+                cyclist.color = '#333';
+                stopWarningSound();
+                showCarBackWarning = false;
+                const isNewHighScore = saveHighScore(score, playerName);
+                gameOverTitle.textContent = isNewHighScore ? "Nouveau Record !" : "Perdu !";
+                finalScoreElement.textContent = score;
+                displayHighScores();
+                gameOverModal.style.display = 'flex';
+            }
+        }
+
+
+        // --- Boucle de jeu principale ---
+        function gameLoop() {
+            if (gameOver) {
+                cancelAnimationFrame(animationFrameId);
+                return;
+            }
+
+
+            // Mises à jour
+            updateCyclistPosition();
+            updatePeloton();
+            updateRoadMarkings();
+            updateCornStalks();
+            updatePotholes();
+            updateVehicles();
+            clouds.forEach(c => c.x += c.speed);
+            checkCollisions();
+
+
+            if(gameOver) return;
+
+
+            // Calcul et affichage
+            distance += gameSpeed * 0.05;
+            score = Math.floor(distance);
+            let kmh = 26 + (gameSpeed - 4) * 1.5;
+            kmh = Math.max(26, Math.min(34, kmh));
+           
+            scoreDisplayElement.textContent = score;
+            distanceDisplayElement.textContent = Math.floor(distance) + ' m';
+            speedDisplayElement.textContent = Math.floor(kmh);
+
+
+            // Dessin
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+            drawSky();
+            drawClouds();
+            drawMountain();
+            drawGround();
+            drawCornfields();
+            drawRoad();
+            drawPotholes();
+            drawVehicles();
+            peloton.forEach(p => drawSingleCyclist(p)); // Dessiner le peloton
+            drawSingleCyclist(cyclist); // Dessiner le joueur par-dessus
+            drawCarBackWarning();
+           
+            gameSpeed += 0.001;
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+
+        // --- Initialisation du jeu ---
+        function initGame() {
+            resizeCanvas();
+            potholes.length = 0; vehicles.length = 0; roadMarkings.length = 0;
+            cornStalks.length = 0; clouds.length = 0; peloton.length = 0; positionHistory.length = 0;
+            score = 0; distance = 0; gameSpeed = 4; gameOver = false;
+            isVehicleSpawning = false;
+            showCarBackWarning = false;
+           
+            nextPotholeDistance = 75 + Math.random() * 50;
+            nextVehicleDistance = 400;
+
+
+            cyclist.color = '#ff4500';
+            scoreDisplayElement.textContent = score;
+            distanceDisplayElement.textContent = Math.floor(distance) + ' m';
+            gameOverModal.style.display = 'none';
+            warningBox.style.display = 'none';
+
+
+            for (let i = 0; i < 2; i++) { // Peloton de 2 suiveurs
+                peloton.push({
+                    x: cyclist.x,
+                    y: cyclist.y,
+                    baseWidth: 15,
+                    baseHeight: 30,
+                    color: pelotonColors[i]
+                });
+            }
+
+
+            for (let i = 0; i < 5; i++) {
+                clouds.push({
+                    x: Math.random() * canvasWidth,
+                    y: Math.random() * (horizonY * 0.8),
+                    radius: Math.random() * 15 + 10,
+                    speed: Math.random() * 0.4 + 0.1
+                });
+            }
+           
+            if(animationFrameId) cancelAnimationFrame(animationFrameId);
+            gameLoop();
+        }
+
+
+        // --- Gestionnaires d'événements ---
+        startGameBtn.addEventListener('click', () => {
+            playerName = playerNameInput.value || "Cycliste Anonyme";
+            startModal.style.display = 'none';
+            initAudio();
+            initGame();
+        });
+
+
+        restartButton.addEventListener('click', () => {
+            initGame();
+        });
+       
+        window.addEventListener('keydown', (e) => { if (e.key in keys) keys[e.key] = true; });
+        window.addEventListener('keyup', (e) => { if (e.key in keys) keys[e.key] = false; });
+        window.addEventListener('resize', () => {
+             if (!gameOver && startModal.style.display === 'none') {
+                cancelAnimationFrame(animationFrameId);
+                initGame();
+             } else {
+                resizeCanvas();
+             }
+        });
+       
+        // --- Premier chargement ---
+        resizeCanvas();
+
+
+    </script>
+</body>
+</html>
